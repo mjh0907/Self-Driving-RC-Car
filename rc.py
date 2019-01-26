@@ -6,6 +6,8 @@ from pynput.keyboard import Key, Listener
 import socket
 import sys
 import struct
+from PIL import Image
+
 
 MAP_SIZE_PIXELS         = 500
 MAP_SIZE_METERS         = 15
@@ -43,7 +45,7 @@ class CustomizedMapVisualizer(Visualizer):
         return self._refresh()
 
 # image file
-image_filename = '~/Documents/display.png'
+image_filename = '/home/ubuntu/RCWeb/dash'
 
 HOST, PORT = "localhost", 50007
 
@@ -54,7 +56,7 @@ s.connect((HOST, PORT))
 slam = RMHC_SLAM(LaserModel(), MAP_SIZE_PIXELS, MAP_SIZE_METERS)
 
     # Set up a SLAM display
-viz = CustomizedMapVisualizer(MAP_SIZE_PIXELS, MAP_SIZE_METERS, 'SLAM')
+viz = MapVisualizer(MAP_SIZE_PIXELS, MAP_SIZE_METERS, 'SLAM')
 
     # Initialize an empty trajectory
 trajectory = []
@@ -110,27 +112,38 @@ def autoDrive():
     global stop
     idx = 0
     while True:
-        if idx > 200:
-            break
+        #if idx > 500:
+        #    break
+	idx = idx + 1
         if stop:
             time.sleep(1)
             continue
-	raw_data = s.recv(3000)
+	raw_data = s.recv(8000)
 	num_floats = int(len(raw_data) / 4)
 	format_str = 'f' * num_floats
 	data = list(struct.unpack(format_str, raw_data[:num_floats * 4]))
- 
+        
+	if (idx % 40) != 0: # use a big number!! or will read more than 720 points
+	    #time.sleep(0.5)
+	    continue
         # Extract distances and angles from tuple
         raw_dist = data[1::2]
         distances = [i*1000 for i in raw_dist]
         angles    = data[0::2]
         #distances = [1000*(idx % 5) for x in range(0,720)]#[i*1000 for i in raw_dist]
         #angles    = [x/2.0 for x in range(0,720)]#data[0::2]
+	print("distances:")
+	print(len(distances))
 	#print(distances)
+	print("angles:")
 	#print(angles)
+	print(len(angles))
+	
+	print("start: update"+repr(idx))
         # Update SLAM with current Lidar scan and scan angles if adequate
         if len(distances) > MIN_SAMPLES:
-            slam.update(distances, scan_angles_degrees=angles)
+            slam.update(distances) #, scan_angles_degrees=angles)
+	print("end: update"+repr(idx))
             #previous_distances = distances#.copy()
             #previous_angles    = angles#.copy()
 
@@ -140,18 +153,35 @@ def autoDrive():
 
         # Get current robot position
         x, y, theta = slam.getpos()
+	# Add new position to trajectory
+        trajectory.append((x, y))
 
         # Get current map bytes as grayscale
         slam.getmap(mapbytes)
-
+# Put trajectory into map as black pixels
+	for coords in trajectory:
+			
+	    x_mm, y_mm = coords
+    	    x_pix = mm2pix(x_mm)
+	    y_pix = mm2pix(y_mm)
+	    mapbytes[y_pix * MAP_SIZE_PIXELS + x_pix] = 0;
+ # Save map and trajectory as PNG file
+	print("gen image..")
+	image = Image.frombuffer('L', (MAP_SIZE_PIXELS, MAP_SIZE_PIXELS), mapbytes, 'raw', 'L', 0, 1)
+	image.save('%s.png' % image_filename)
+	print("done gen image..")
         # Display map and robot pose, exiting gracefully if user closes it
-	idx = idx + 1
-        if idx % 10 == 0 and not viz.display(x/1000., y/1000., theta, mapbytes, image_filename):
-           exit(0)
-	print("update"+repr(idx))
+	#print("display..")
+        #if idx % 5 == 0 and  not viz.display(x/1000., y/1000., theta, mapbytes):
+        #   exit(0)
 	#doAction([leftPin], 0.1)
           #time.sleep(1)
 
+
+
+def mm2pix(mm):
+        
+    return int(mm / (MAP_SIZE_METERS * 1000. / MAP_SIZE_PIXELS))  
          
 def on_press(key):
     global freezeUntilTime
