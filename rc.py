@@ -19,6 +19,37 @@ MIN_SAMPLES   = 200
 from breezyslam.algorithms import RMHC_SLAM
 from breezyslam.sensors import YDLidarX4 as LaserModel
 from roboviz import MapVisualizer
+from roboviz import Visualizer
+
+class CustomizedMapVisualizer(Visualizer):
+    
+    def __init__(self, map_size_pixels, map_size_meters, title='MapVisualizer', show_trajectory=False):
+
+        # Put origin in lower left; disallow zero-angle setting
+        Visualizer._init(self, map_size_pixels, map_size_meters, title, 0, show_trajectory, 0)
+
+    def display(self, x_m, y_m, theta_deg, mapbytes, image_filename):
+
+        self._setPose(x_m, y_m, theta_deg)
+
+        mapimg = np.reshape(np.frombuffer(mapbytes, dtype=np.uint8), (self.map_size_pixels, self.map_size_pixels))
+
+        # Pause to allow display to refresh
+        plt.pause(.001)
+
+        if self.img_artist is None:
+
+            self.img_artist = self.ax.imshow(mapimg, cmap=colormap.gray)
+
+        else:
+
+            #self.img_artist.set_data(mapimg)
+            fig.savefig(image_filename)
+
+        return self._refresh()
+
+# image file
+image_filename = '~/Documents/display.png'
 
 HOST, PORT = "localhost", 50007
 
@@ -29,7 +60,7 @@ s.connect((HOST, PORT))
 slam = RMHC_SLAM(LaserModel(), MAP_SIZE_PIXELS, MAP_SIZE_METERS)
 
     # Set up a SLAM display
-viz = MapVisualizer(MAP_SIZE_PIXELS, MAP_SIZE_METERS, 'SLAM')
+viz = CustomizedMapVisualizer(MAP_SIZE_PIXELS, MAP_SIZE_METERS, 'SLAM')
 
     # Initialize an empty trajectory
 trajectory = []
@@ -121,7 +152,8 @@ def autoDrive():
 
         # Display map and robot pose, exiting gracefully if user closes it
 	idx = idx + 1
-        if idx % 10 == 0 and not viz.display(x/1000., y/1000., theta, mapbytes):
+        if idx % 10 == 0 and not viz.display(x/1000., y/1000., theta, mapbytes, image_filename):
+            viz.
            exit(0)
 	print("update"+repr(idx))
 	#doAction([leftPin], 0.1)
