@@ -153,7 +153,6 @@ def autoDrive():
         # Display map and robot pose, exiting gracefully if user closes it
 	idx = idx + 1
         if idx % 10 == 0 and not viz.display(x/1000., y/1000., theta, mapbytes, image_filename):
-            viz.
            exit(0)
 	print("update"+repr(idx))
 	#doAction([leftPin], 0.1)
