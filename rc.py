@@ -37,14 +37,8 @@ class CustomizedMapVisualizer(Visualizer):
         # Pause to allow display to refresh
         plt.pause(.001)
 
-        if self.img_artist is None:
-
-            self.img_artist = self.ax.imshow(mapimg, cmap=colormap.gray)
-
-        else:
-
-            #self.img_artist.set_data(mapimg)
-            fig.savefig(image_filename)
+	# save to a png file
+        fig.savefig(image_filename)
 
         return self._refresh()
 
