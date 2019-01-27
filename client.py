@@ -47,7 +47,9 @@ class CustomizedMapVisualizer(Visualizer):
 image_filename = './dash'
 
 # Create an RMHC SLAM object with a laser model and optional robot model
-slam = RMHC_SLAM(LaserModel(), MAP_SIZE_PIXELS, MAP_SIZE_METERS)
+MAP_QUALITY = 1
+HOLE_SIZE_MM = 300
+slam = RMHC_SLAM(LaserModel(), MAP_SIZE_PIXELS, MAP_SIZE_METERS, MAP_QUALITY, HOLE_SIZE_MM)
 
     # Set up a SLAM display
 viz = MapVisualizer(MAP_SIZE_PIXELS, MAP_SIZE_METERS, 'SLAM')

@@ -6,6 +6,7 @@ from random import random, randint
 import random
 import matplotlib.pyplot as plt
 import time
+import sys
 
 # Importing the Kivy packages
 from kivy.app import App
@@ -24,14 +25,15 @@ from aii import Dqn
 Config.set('input', 'mouse', 'mouse,multitouch_on_demand')
 
 # Introducing last_x and last_y, used to keep the last point in memory when we draw the sand on the map
-last_x = 0
+last_x = 0   # axis x is horizontal, y is vertical, left bottom coordinates are (0,0)
 last_y = 0
-n_points = 0
-length = 0
+n_points = 0 # number of sand points in the current sand line
+length = 0 # length of current sand line
 
 # Getting our AI, which we call "brain", and that contains our neural network that represents our Q-function
-brain = Dqn(5,3,0.9)
-action2rotation = [0,20,-20]
+brain = Dqn(5,3,0.9) # 7 inputs, 4 outputs
+# keep 0 at first
+action2rotation = [0,20,-20]#, 180] # action rotations, go straigth, left turn 20 degree, right turn 20 degree, reverse
 last_reward = 0
 scores = []
 
@@ -49,18 +51,23 @@ def init():
 
 # Initializing the last distance
 last_distance = 0
+last_on_sand = False
+last_action = -1
 
 # Creating the car class
 
+max_pixel_density = 16
+car_size = 10 
 class Car(Button):
-    size = (5, 1)
-    # color = (1, 0, 0)
+    size = (car_size, 5)
+    color = (0, 100, 0)
 
-    angle = NumericProperty(0)
-    rotation = NumericProperty(0)
+    angle = NumericProperty(0) # current heading direction
+    rotation = NumericProperty(0) # current action rotation
     velocity_x = NumericProperty(0)
     velocity_y = NumericProperty(0)
     velocity = ReferenceListProperty(velocity_x, velocity_y)
+    # todo use list instead of 4 sensor objects
     sensor1_x = NumericProperty(0)
     sensor1_y = NumericProperty(0)
     sensor1 = ReferenceListProperty(sensor1_x, sensor1_y)
@@ -70,37 +77,73 @@ class Car(Button):
     sensor3_x = NumericProperty(0)
     sensor3_y = NumericProperty(0)
     sensor3 = ReferenceListProperty(sensor3_x, sensor3_y)
-    signal1 = NumericProperty(0)
-    signal2 = NumericProperty(0)
-    signal3 = NumericProperty(0)
+    sensor4_x = NumericProperty(0)
+    sensor4_y = NumericProperty(0)
+    sensor4 = ReferenceListProperty(sensor4_x, sensor4_y)
+    signal1 = NumericProperty(0)  # signal from sensor1, pixel density of sensor, 0-255
+    signal2 = NumericProperty(0) # signal from sensor2
+    signal3 = NumericProperty(0) # signal from sensor3
+    signal4 = NumericProperty(0) # signal from sensor4
 
     def move(self, rotation):
-        print("position: (" + str(self.x) + ", " + str(self.y) + ")")
+        #print("position: (" + str(self.x) + ", " + str(self.y) + ")")
         self.pos = Vector(*self.velocity) + self.pos
         self.rotation = rotation
         self.angle = self.angle + self.rotation
-        self.sensor1 = Vector(30, 0).rotate(self.angle) + self.pos
-        self.sensor2 = Vector(30, 0).rotate((self.angle+30)%360) + self.pos
-        self.sensor3 = Vector(30, 0).rotate((self.angle-30)%360) + self.pos
-        self.signal1 = int(np.sum(sand[int(self.sensor1_x)-10:int(self.sensor1_x)+10, int(self.sensor1_y)-10:int(self.sensor1_y)+10]))/400.
-        self.signal2 = int(np.sum(sand[int(self.sensor2_x)-10:int(self.sensor2_x)+10, int(self.sensor2_y)-10:int(self.sensor2_y)+10]))/400.
-        self.signal3 = int(np.sum(sand[int(self.sensor3_x)-10:int(self.sensor3_x)+10, int(self.sensor3_y)-10:int(self.sensor3_y)+10]))/400.
-        if self.sensor1_x>longueur-10 or self.sensor1_x<10 or self.sensor1_y>largeur-10 or self.sensor1_y<10:
-            self.signal1 = 1.
-        if self.sensor2_x>longueur-10 or self.sensor2_x<10 or self.sensor2_y>largeur-10 or self.sensor2_y<10:
-            self.signal2 = 1.
-        if self.sensor3_x>longueur-10 or self.sensor3_x<10 or self.sensor3_y>largeur-10 or self.sensor3_y<10:
-            self.signal3 = 1.
+        side_detect_angle = 30 # left/right sensor angle to the current heading direction
+        detect_area_range = 30 # sensor detection distance, TODO, set to detect_area_length/2?
+        detect_area_length = 10 # sensor detection length
+        detect_area_width = 10 # sensor detection width, e.g, for the example below, 
+                               # the detection range is 6 pixel ahead, length is 4 pixel, width is 1 pixel, 
+                               # (dots within [] represents detected area),  i.e, ....[..|..]
+        # TODO use car size length, width
+        sand_count1 = float(np.count_nonzero(sand[int(self.sensor1_x)-detect_area_length:int(self.sensor1_x)+detect_area_length, int(self.sensor1_y)-detect_area_width:int(self.sensor1_y)+detect_area_width]))
+        sand_count2 = float(np.count_nonzero(sand[int(self.sensor2_x)-detect_area_length:int(self.sensor2_x)+detect_area_length, int(self.sensor2_y)-detect_area_width:int(self.sensor2_y)+detect_area_width]))
+        sand_count3 = float(np.count_nonzero(sand[int(self.sensor3_x)-detect_area_length:int(self.sensor3_x)+detect_area_length, int(self.sensor3_y)-detect_area_width:int(self.sensor3_y)+detect_area_width]))
+        sand_count4 = float(np.count_nonzero(sand[int(self.sensor3_x)-detect_area_length:int(self.sensor4_x)+detect_area_length, int(self.sensor4_y)-detect_area_width:int(self.sensor4_y)+detect_area_width]))
+        total_pixel = (detect_area_length * 2) * (detect_area_width * 2)
+        # avoid divide by 0 and filter small obstacle and noise
+        sand_pixel_count_threshold = total_pixel * 0.05
+        if (sand_count1 < sand_pixel_count_threshold):
+            sand_count1 = sys.maxint 
+        if (sand_count2 < sand_pixel_count_threshold):
+            sand_count2 = sys.maxint 
+        if (sand_count3 < sand_pixel_count_threshold) :
+            sand_count3 = sys.maxint 
+        if (sand_count4 < sand_pixel_count_threshold) :
+            sand_count4 = sys.maxint 
+        self.sensor1 = Vector(detect_area_range, 0).rotate(self.angle) + self.pos  # front sensor
+        self.sensor2 = Vector(detect_area_range, 0).rotate((self.angle+side_detect_angle)%360) + self.pos  # left sensor
+        self.sensor3 = Vector(detect_area_range, 0).rotate((self.angle-side_detect_angle)%360) + self.pos # right sensor
+        self.sensor4 = Vector(detect_area_range, 0).rotate((self.angle-180)%360) + self.pos # back sensor
+        # avg non zero pixel density, as simple avg all pixel will not be able to detect small obstacles
+        # todo may need to improve it
+        # python int is big enough to avoid overflow
+        self.signal1 = int(np.sum(sand[int(self.sensor1_x)-detect_area_length:int(self.sensor1_x)+detect_area_length, int(self.sensor1_y)-detect_area_width:int(self.sensor1_y)+detect_area_width]))/sand_count1
+        self.signal2 = int(np.sum(sand[int(self.sensor2_x)-detect_area_length:int(self.sensor2_x)+detect_area_length, int(self.sensor2_y)-detect_area_width:int(self.sensor2_y)+detect_area_width]))/sand_count2
+        self.signal3 = int(np.sum(sand[int(self.sensor3_x)-detect_area_length:int(self.sensor3_x)+detect_area_length, int(self.sensor3_y)-detect_area_width:int(self.sensor3_y)+detect_area_width]))/sand_count3
+        self.signal4 = int(np.sum(sand[int(self.sensor4_x)-detect_area_length:int(self.sensor4_x)+detect_area_length, int(self.sensor4_y)-detect_area_width:int(self.sensor4_y)+detect_area_width]))/sand_count4
+        # if detection range is out of the map, signal set to 1
+        if self.sensor1_x>longueur-car_size or self.sensor1_x<car_size or self.sensor1_y>largeur-car_size or self.sensor1_y<car_size:
+            self.signal1 = 0 #max_pixel_density
+        if self.sensor2_x>longueur-car_size or self.sensor2_x<car_size or self.sensor2_y>largeur-car_size or self.sensor2_y<car_size:
+            self.signal2 = 0 #max_pixel_density
+        if self.sensor3_x>longueur-car_size or self.sensor3_x<car_size or self.sensor3_y>largeur-car_size or self.sensor3_y<car_size:
+            self.signal3 = 0 #max_pixel_density
+        if self.sensor4_x>longueur-car_size or self.sensor4_x<car_size or self.sensor4_y>largeur-car_size or self.sensor4_y<car_size:
+            self.signal4 = 0 #max_pixel_density
 
 class Ball1(Button):
-    size = (1, 1)
+    size = (5, 5)
 class Ball2(Button):
-    size = (1, 1)
+    size = (5, 5)
 class Ball3(Button):
-    size = (1, 1)
+    size = (5, 5)
 
 # Creating the game class
 
+car_speed_per_unit= 6 # car speed per unit
+car_slow_speed_per_unit= 3 # car slow speed per unit
 class Game(Widget):
 
     car = Car()
@@ -109,9 +152,11 @@ class Game(Widget):
     ball3 = Ball3()
 
     def serve_car(self):
+        global car_speed_per_unit
         self.car.center = self.center
-        self.car.velocity = Vector(6, 0)
-        # self.car.color = (1, 0, 0)
+        #TODO set car velocity
+        self.car.velocity = Vector(car_speed_per_unit, 0)
+        #self.car.color = (1, 0.3, 0.4)
         # self.car.size = (5, 5)
         self.add_widget(self.car)
         self.add_widget(self.ball1)
@@ -120,13 +165,17 @@ class Game(Widget):
 
     def update(self, dt):
         global brain
-        global last_reward
+        global last_reward # reward of last action
         global scores
         global last_distance
+        global last_on_sand
+        global last_action
         global goal_x
         global goal_y
-        global longueur
-        global largeur
+        global longueur # length of map
+        global largeur # width of map
+        global car_speed_per_unit, car_slow_speed_per_unit
+        global car_size
 
         longueur = self.width
         largeur = self.height
@@ -138,8 +187,12 @@ class Game(Widget):
         xx = goal_x - self.car.x
         yy = goal_y - self.car.y
         orientation = Vector(*self.car.velocity).angle((xx,yy))/180.
+        distance_to_lane = 0
+        # TODO set distance to lane
         last_signal = [self.car.signal1, self.car.signal2, self.car.signal3, orientation, -orientation]
+        #last_signal = [self.car.signal1, self.car.signal2, self.car.signal3, self.car.signal4, orientation, -orientation, distance_to_lane]
         action = brain.update(last_reward, last_signal)
+        print("score: "+repr(brain.score()))
         scores.append(brain.score())
         rotation = action2rotation[action]
         self.car.move(rotation)
@@ -149,66 +202,128 @@ class Game(Widget):
         self.ball3.pos = self.car.sensor3
         self.steps += 1
         
-        if sand[int(self.car.x),int(self.car.y)] > 0:
-            self.car.velocity = Vector(1, 0).rotate(self.car.angle)
-            last_reward = -50 # sand reward
+        sand_reward = 10#10 # 
+        wall_reward = -500 # 
+        to_no_sand_reward = -5000# 
+        to_sand_reward = 0.1 # 
+        step_reward = 0.1 # basic reward each step
+        forward_reward = 0.1 # 
+        close_to_wall_reward = -0.1
+        last_reward = 0 # init
+        #sand_reward = -50
+        half_car_size = car_size / 2
+        total = int(np.sum(sand[int(self.car.x)-half_car_size: int(self.car.x)+half_car_size,  int(self.car.y)-half_car_size :int(self.car.y)+half_car_size ]))
+        #if sand[int(self.car.x),int(self.car.y)] > obstacle_density_threshold:
+        if total > 0:
+            # hit sand
+            # TODO should stop or slowdown, backward? now backward, should choise left/right/backward/forawrd according to signal
+            #self.car.velocity = Vector(1, 0).rotate(self.car.angle)
+            #print("on lane")
+            # slowdown to get more bad samples?
+            self.car.velocity = Vector(car_slow_speed_per_unit, 0).rotate(self.car.angle)
+            last_reward = sand_reward # sand reward
+            if (last_on_sand == False):
+                last_reward += to_sand_reward # sand reward
+            last_on_sand = True
+            #print("hit sand")
+        elif total < 0:
+            # obstacle
+            self.car.velocity = Vector(car_slow_speed_per_unit, 0).rotate(self.car.angle)
+            last_reward = wall_reward # sand reward
         else: # otherwise
-            self.car.velocity = Vector(6, 0).rotate(self.car.angle)
-            last_reward = -0.1 # driving away from objective reward
+            self.car.velocity = Vector(car_speed_per_unit, 0).rotate(self.car.angle)
+            if (last_on_sand == True):
+                last_reward += to_no_sand_reward # sand reward
+            last_on_sand = False
             if distance < last_distance:
-                last_reward = 0.1 # driving towards objective reward
+                last_reward += step_reward # driving towards objective reward
+            else:
+                last_reward += -step_reward # if driving away from objective reward
+            if last_action == 0:
+                last_reward += forward_reward
+        last_reward += -0.005*self.steps #
+            # TODO consider distance to obstacle, consider driving angle, lane departion, prefer go straight
 
-        if self.car.x < 10:
-            self.car.x = 10
-            last_reward = -1 # too close to edges of the wall reward
-        if self.car.x > self.width - 10:
-            self.car.x = self.width - 10
-            last_reward = -1 #
-        if self.car.y < 10:
-            self.car.y = 10
-            last_reward = -1 #
-        if self.car.y > self.height - 10:
-            self.car.y = self.height - 10
-            last_reward = -1 #
+        # TODO allow go out of boundary may lead to run time error?
+        if self.car.x < car_size:
+            self.car.x = car_size
+            last_reward += close_to_wall_reward # too close to edges of the wall reward
+        if self.car.x > self.width - car_size:
+            self.car.x = self.width - car_size
+            last_reward += close_to_wall_reward #
+        if self.car.y < car_size:
+            self.car.y = car_size
+            last_reward +=  close_to_wall_reward #
+        if self.car.y > self.height - car_size:
+            self.car.y = self.height - car_size
+            last_reward += close_to_wall_reward 
+        print("last reward: "+repr(last_reward))
 
-        if distance < 100:
+        # TODO tune this
+        reach_goal_threshold = car_size * 4
+        if distance < reach_goal_threshold:
+            print("reach goal in " + repr(self.steps) + ", increase by " + repr(self.last_steps - self.steps))
             goal_x = self.width-goal_x
             goal_y = self.height-goal_y
-            last_reward = self.last_steps - self.steps # reward for reaching the objective faster than last round (may want to scale this)
+            #last_reward = self.last_steps - self.steps # reward for reaching the objective faster than last round (TODO may want to scale this)
+            # TODO is it appropriate to punish last step by mistakes we made from all the previous steps?
+            #last_reward += (self.last_steps - self.steps) #* step_reward # reward for reaching the objective faster than last round
             self.last_steps = self.steps 
+            print("score: "+repr(brain.score())+ " steps: " + repr(self.steps))
             self.steps = 0
+        last_action = action
         last_distance = distance
 
 
 # Adding the painting tools
-
+min_obstacle_density = 1
+default_obstacle_density = 10
+max_obstacle_density = 16
+obstacle_density_threshold = 1 # pixel density
+sand_line_width = 20
 class MyPaintWidget(Widget):
 
     def on_touch_down(self, touch):
-        global length, n_points, last_x, last_y
+        global length, n_points, last_x, last_y, min_obstacle_density, max_obstacle_density, default_obstacle_density 
         with self.canvas:
-            Color(0.8,0.7,0)
+            if touch.button == 'left':
+                Color(0.8,0.7,0)
+            else:
+                Color(0,0.8,0.7)
             d = 10.
-            touch.ud['line'] = Line(points = (touch.x, touch.y), width = 10)
+            touch.ud['line'] = Line(points = (touch.x, touch.y), width = default_obstacle_density)
             last_x = int(touch.x)
             last_y = int(touch.y)
             n_points = 0
             length = 0
-            sand[int(touch.x),int(touch.y)] = 1
+            #print("draw sand")
+            if touch.button == 'left':
+                sand[int(touch.x),int(touch.y)] = default_obstacle_density 
+            else:
+                sand[int(touch.x),int(touch.y)] = -default_obstacle_density 
 
     def on_touch_move(self, touch):
-        global length, n_points, last_x, last_y
+        global length, n_points, last_x, last_y, min_obstacle_density, max_obstacle_density 
+        touch.ud['line'].points += [touch.x, touch.y]
+        x = int(touch.x)
+        y = int(touch.y)
+        length += np.sqrt(max((x - last_x)**2 + (y - last_y)**2, 2))
+        n_points += 1.
+        avg_points = n_points/(length)
+        density = int(20 * avg_points + 1)
+        touch.ud['line'].width = density
+        w = sand_line_width / 2
+        pixel_depth = max_obstacle_density 
+        if density < pixel_depth:
+            pixel_depth = density
+        #print("draw sand")
         if touch.button == 'left':
-            touch.ud['line'].points += [touch.x, touch.y]
-            x = int(touch.x)
-            y = int(touch.y)
-            length += np.sqrt(max((x - last_x)**2 + (y - last_y)**2, 2))
-            n_points += 1.
-            density = n_points/(length)
-            touch.ud['line'].width = int(20 * density + 1)
-            sand[int(touch.x) - 10 : int(touch.x) + 10, int(touch.y) - 10 : int(touch.y) + 10] = 1
-            last_x = x
-            last_y = y
+            print("right mouse clicked")
+            sand[int(touch.x) - w : int(touch.x) + w, int(touch.y) - w : int(touch.y) + w] = pixel_depth 
+        else:
+            sand[int(touch.x) - w : int(touch.x) + w, int(touch.y) - w : int(touch.y) + w] = -pixel_depth 
+        last_x = x
+        last_y = y
 
 # Adding the API Buttons (clear, save and load)
 
@@ -217,7 +332,7 @@ class CarApp(App):
     def build(self):
         parent = Game()
         parent.serve_car()
-        Clock.schedule_interval(parent.update, 1.0/120.0)
+        Clock.schedule_interval(parent.update, 1.0/150.0)
         self.painter = MyPaintWidget()
         clearbtn = Button(text = 'clear')
         savebtn = Button(text = 'save', pos = (parent.width, 0))

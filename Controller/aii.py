@@ -10,6 +10,7 @@ Created on Sun Feb 18 13:30:20 2018
 import numpy as np
 import random
 import os
+import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -25,8 +26,8 @@ class Network(nn.Module):
         super(Network, self).__init__()
         self.input_size = input_size
         self.nb_action = nb_action
-        self.fc1 = nn.Linear(input_size, 30)
-        self.fc2 = nn.Linear(30, nb_action)
+        self.fc1 = nn.Linear(input_size, 50)
+        self.fc2 = nn.Linear(50, nb_action)
         
     def forward(self, state):
         x = F.relu(self.fc1(state))
@@ -48,6 +49,9 @@ class ReplayMemory(object):
             
     def sample(self, batch_size):
         samples = zip(*random.sample(self.memory, batch_size))
+        #intlist = range(len(self.memory))
+        #candidates = [self.memory[i] for i in intlist if self.memory[i][3] < threshold]
+        #samples = zip(*random.sample(candidates, min(len(candidates), batch_size)))
         return map(lambda x: Variable(torch.cat(x, 0)), samples)
         
 # Implementing Deep Q Learning
@@ -58,14 +62,23 @@ class Dqn():
         self.gamma = gamma
         self.reward_window = []
         self.model = Network(input_size, nb_action)
-        self.memory = ReplayMemory(100000)
+        memory_capacity = 10000
+        # terrible/bad/good/excellent memory
+        self.memory = [ReplayMemory(memory_capacity), ReplayMemory(memory_capacity), ReplayMemory(memory_capacity), ReplayMemory(memory_capacity)]
+        self.reward_threshold = [-2, 0, 0.5, sys.maxint]
+        self.memory_threshold = [100, 50, 50, 100]
         self.optimizer = optim.Adam(self.model.parameters(), lr = 0.001)
         self.last_state = torch.Tensor(input_size).unsqueeze(0)
         self.last_action = 0
         self.last_reward = 0
         
     def select_action(self, state):
-        probs = F.softmax(self.model(Variable(state, volatile = True))*10) # T(Temperature)=10
+        #print(state)
+        m2 = self.model(Variable(state, volatile = True))*10 # T(Temperature)=10
+        #print(m2)
+        probs = F.softmax(m2)
+        #probs = F.softmax(self.model(Variable(state, volatile = True))*10) # T(Temperature)=10
+        #print(probs)
         action = probs.multinomial(num_samples=1) #????
         return action.data[0,0]
     
@@ -80,11 +93,21 @@ class Dqn():
         
     def update(self, reward, new_signal):
         new_state = torch.Tensor(new_signal).float().unsqueeze(0)
-        self.memory.push((self.last_state, new_state, torch.LongTensor([int(self.last_action)]), torch.Tensor([self.last_reward])))
+        for i in range(len(self.memory)):
+            if (self.last_reward <= self.reward_threshold[i]):
+                #print("last reward is "+repr(self.last_reward))
+                #print("push into memory "+repr(i))
+                self.memory[i].push((self.last_state, new_state, torch.LongTensor([int(self.last_action)]), torch.Tensor([self.last_reward])))
+                break
+        for i in range(len(self.memory)):
+            if len(self.memory[i].memory) > self.memory_threshold[i]:
+                #print("learn from memory "+repr(i))
+                batch_state, batch_next_state, batch_action, batch_reward = self.memory[i].sample(self.memory_threshold[i]) #max(100, len(self.memory.memory)/3))
+                self.learn(batch_state, batch_next_state, batch_reward, batch_action)
         action = self.select_action(new_state)
-        if len(self.memory.memory) > 100:
-            batch_state, batch_next_state, batch_action, batch_reward = self.memory.sample(100)
-            self.learn(batch_state, batch_next_state, batch_reward, batch_action)
+        #print("state and action")
+        #print(new_state)
+        #print(action)
         self.last_action = action
         self.last_state = new_state
         self.last_reward = reward
