@@ -44,13 +44,8 @@ class CustomizedMapVisualizer(Visualizer):
         return self._refresh()
 
 # image file
-image_filename = '/home/ubuntu/RCWeb/dash'
+image_filename = './dash'
 
-HOST, PORT = "192.168.0.181", 50007
-
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-s.connect((HOST, PORT))
 # Create an RMHC SLAM object with a laser model and optional robot model
 slam = RMHC_SLAM(LaserModel(), MAP_SIZE_PIXELS, MAP_SIZE_METERS)
 
@@ -68,15 +63,7 @@ previous_distances = None
 previous_angles    = None
 
 # Pin Definitons:
-pwmPin = 18 # Broadcom pin 18 (P1 pin 12)
-backPin = 2# Broadcom pin 23 (P1 pin 16)
-frontPin = 3
-leftPin = 10
-rightPin = 17
-butPin = 7 # Broadcom pin 17 (P1 pin 11)
-
 freezeUntilTime = 0
-dc = 95 # duty cycle (0-100) for PWM pin
 
 def doAction(pin, sec):
     time.sleep(sec)
@@ -85,45 +72,92 @@ def action(pin, sec):
     thread = Thread(target = doAction, args = (pin, sec, )) 
     thread.start()
     	
-stop = False
 
 def autoDrive():
     global autoMode
-    global stop
     idx = 0
+    search_start = True
+
+    HOST, PORT = "192.168.0.18", 50007
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.connect((HOST, PORT))
+    feed_point = 720 # ydlidar x4, each scan contains 720 point
+    left_over = []
     while True:
-        #if idx > 500:
-        #    break
-	idx = idx + 1
-        if stop:
-            time.sleep(1)
+        idx = idx + 1
+
+        '''
+        test_angles    = [x/2.0 for x in range(0,720)]
+        test_distances = [(idx % 5) for x in range(0,720)]
+        zipped = zip(test_angles, test_distances)
+        flatten = [item for sublist in zipped  for item in sublist]
+        new_data = flatten
+        '''
+        print("receiving new data...")
+        raw_data = s.recv(10000)
+        num_floats = int(len(raw_data) / 4)
+        format_str = 'f' * num_floats
+        new_data = list(struct.unpack(format_str, raw_data[:num_floats * 4]))
+        print("received new data", repr(len(new_data)))
+        if search_start: # find start position
+            for pos, val in enumerate(new_data[::4]):
+                if val == -180:
+                    left_over = new_data[pos:]
+                    search_start = False
+            print("located start position")
             continue
-	raw_data = s.recv(8000)
-	num_floats = int(len(raw_data) / 4)
-	format_str = 'f' * num_floats
-	data = list(struct.unpack(format_str, raw_data[:num_floats * 4]))
+
+        data = left_over + new_data
+            
+        #if (idx % 50) != 0: # use a big number!! or will read more than 720 points
+            #time.sleep(0.5)
+        #    continue
+            # Extract distances and angles from tuple
         
-	if (idx % 40) != 0: # use a big number!! or will read more than 720 points
-	    #time.sleep(0.5)
-	    continue
-        # Extract distances and angles from tuple
-        raw_dist = data[1::2]
-        distances = [i*1000 for i in raw_dist]
-        angles    = data[0::2]
-        #distances = [1000*(idx % 5) for x in range(0,720)]#[i*1000 for i in raw_dist]
-        #angles    = [x/2.0 for x in range(0,720)]#data[0::2]
-	print("distances:")
-	print(len(distances))
-	#print(distances)
-	print("angles:")
-	#print(angles)
-	print(len(angles))
-	
-	print("start: update"+repr(idx))
+        #raw_dist = data[1::2]
+        #distances = [i*1000 for i in raw_dist] # raw data is in meters, convert to mm
+        #angles    = data[0::2]
+        received_size = len(data) #min(len(distances), len(angles))
+        distances = []
+        angles = []
+        feed_size = feed_point * 2
+        if (received_size >= feed_size): # feed distance and angle data
+            skipScan = len(data)/feed_size -1
+            if skipScan > 0:
+                print("*************************skipped " + repr(skipScan) + " scan*****")
+            data = data[skipScan*feed_size:]
+            angles = data[0:feed_size:2] 
+            if (angles[0] != -180): # found invalid data, restart!
+                print("left over is:") 
+                print(left_over[::2])
+                print("new angle is:") 
+                print(angles)
+                search_start = True
+                left_over = []
+                print("found invalid data, restart!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+                continue
+            distances = [i*1000 for i in data[1:feed_size:2]]
+            left_over = data[feed_size:]
+        else:
+            left_over = left_over + data
+            continue #wait until received enough sample
+            # assume first package start from angle 0
+            # todo assert data size is even
+
+        #get data from latest 360 degree scan
+        
+        print("distances:")
+        print(len(distances))
+        #print(distances)
+        print("angles:")
+        #print(angles)
+        print(len(angles))
+        
+        print("start: update"+repr(idx))
         # Update SLAM with current Lidar scan and scan angles if adequate
         if len(distances) > MIN_SAMPLES:
             slam.update(distances) #, scan_angles_degrees=angles)
-	print("end: update"+repr(idx))
+            print("end: update"+repr(idx))
             #previous_distances = distances#.copy()
             #previous_angles    = angles#.copy()
 
@@ -139,33 +173,30 @@ def autoDrive():
         # Get current map bytes as grayscale
         slam.getmap(mapbytes)
 # Put trajectory into map as black pixels
-	for coords in trajectory:
-			
-	    x_mm, y_mm = coords
-    	    x_pix = mm2pix(x_mm)
-	    y_pix = mm2pix(y_mm)
-	    mapbytes[y_pix * MAP_SIZE_PIXELS + x_pix] = 0;
- # Save map and trajectory as PNG file
-	print("gen image..")
-	image = Image.frombuffer('L', (MAP_SIZE_PIXELS, MAP_SIZE_PIXELS), mapbytes, 'raw', 'L', 0, 1)
-	image.save('%s.png' % image_filename)
-	print("done gen image..")
-        # Display map and robot pose, exiting gracefully if user closes it
-	#print("display..")
-        #if idx % 5 == 0 and  not viz.display(x/1000., y/1000., theta, mapbytes):
-        #   exit(0)
-	#doAction([leftPin], 0.1)
-          #time.sleep(1)
-
-
+        for coords in trajectory:
+                
+            x_mm, y_mm = coords
+            x_pix = mm2pix(x_mm)
+            y_pix = mm2pix(y_mm)
+            mapbytes[y_pix * MAP_SIZE_PIXELS + x_pix] = 0;
+     # Save map and trajectory as PNG file
+        print("gen image..")
+        #image = Image.frombuffer('L', (MAP_SIZE_PIXELS, MAP_SIZE_PIXELS), mapbytes, 'raw', 'L', 0, 1)
+        #image.save('%s.png' % image_filename)
+        print("done gen image..")
+            # Display map and robot pose, exiting gracefully if user closes it
+        print("display..")
+        if not viz.display(x/1000., y/1000., theta, mapbytes):
+             exit(0)
+        print("done display")
+        #doAction([leftPin], 0.1)
+              #time.sleep(1)
 
 def mm2pix(mm):
-        
     return int(mm / (MAP_SIZE_METERS * 1000. / MAP_SIZE_PIXELS))  
          
 def on_press(key):
     global freezeUntilTime
-    global stop
     millis = int(round(time.time() * 1000))
     if (millis < freezeUntilTime):
         return
@@ -191,8 +222,6 @@ def on_press(key):
 	    action([backPin, leftPin], actionDuration)
 	elif (key.char == 'c'):
 	    action([backPin, rightPin], actionDuration)
-	elif (key.char == 'p'):
-	    stop = not stop
 	else:
 	    print("Unrecognized key pressed")
 	    print('{0} pressed'.format(key))
@@ -200,51 +229,8 @@ def on_press(key):
 
 
 print("start")
-#autoDrive()
 # Collect events until released
 with Listener(
         on_press=on_press) as listener:
     autoDrive()
     listener.join()
-
-
-"""
-# time.sleep(5)
-print("Here we go! Press CTRL+C to exit")
-try:
-    while 1:
-        if 0: # GPIO.input(butPin): # button is released
-            pwm.ChangeDutyCycle(dc)
-            GPIO.output(leftPin, GPIO.LOW)
-        else: # button is pressed:
-            # pwm.ChangeDutyCycle(100-dc)
-            print("front")
-            GPIO.output(frontPin, GPIO.HIGH)
-            time.sleep(0.5)
-            GPIO.output(frontPin, GPIO.LOW)
-            time.sleep(0.5)
-             
-
-            print("back")
-            GPIO.output(backPin, GPIO.HIGH)
-            time.sleep(0.5)
-            GPIO.output(backPin, GPIO.LOW)
-            time.sleep(0.5)
-
-            print("left")
-            GPIO.output(leftPin, GPIO.HIGH)
-            time.sleep(0.5)
-            GPIO.output(leftPin, GPIO.LOW)
-            time.sleep(0.5)
-
-            print("right")
-            GPIO.output(rightPin, GPIO.HIGH)
-            time.sleep(0.5)
-            GPIO.output(rightPin, GPIO.LOW)
-            time.sleep(0.5)
-
-except KeyboardInterrupt: # If CTRL+C is pressed, exit cleanly:
-    # pwm.stop() # stop PWM
-    GPIO.cleanup() # cleanup all GPIO
-
-"""
