@@ -58,9 +58,9 @@ last_action = -1
 
 max_pixel_density = 16
 car_size = 10 
-class Car(Button):
-    size = (car_size, 5)
-    color = (0, 100, 0)
+class Car(Widget):
+    #size = (car_size, 5)
+    #color = (0, 100, 0)
 
     angle = NumericProperty(0) # current heading direction
     rotation = NumericProperty(0) # current action rotation
@@ -125,20 +125,23 @@ class Car(Button):
         self.signal4 = int(np.sum(sand[int(self.sensor4_x)-detect_area_length:int(self.sensor4_x)+detect_area_length, int(self.sensor4_y)-detect_area_width:int(self.sensor4_y)+detect_area_width]))/sand_count4
         # if detection range is out of the map, signal set to 1
         if self.sensor1_x>longueur-car_size or self.sensor1_x<car_size or self.sensor1_y>largeur-car_size or self.sensor1_y<car_size:
-            self.signal1 = 0 #max_pixel_density
+            self.signal1 = -max_pixel_density
         if self.sensor2_x>longueur-car_size or self.sensor2_x<car_size or self.sensor2_y>largeur-car_size or self.sensor2_y<car_size:
-            self.signal2 = 0 #max_pixel_density
+            self.signal2 = -max_pixel_density
         if self.sensor3_x>longueur-car_size or self.sensor3_x<car_size or self.sensor3_y>largeur-car_size or self.sensor3_y<car_size:
-            self.signal3 = 0 #max_pixel_density
+            self.signal3 = -max_pixel_density
         if self.sensor4_x>longueur-car_size or self.sensor4_x<car_size or self.sensor4_y>largeur-car_size or self.sensor4_y<car_size:
-            self.signal4 = 0 #max_pixel_density
+            self.signal4 = -max_pixel_density
 
-class Ball1(Button):
-    size = (5, 5)
-class Ball2(Button):
-    size = (5, 5)
-class Ball3(Button):
-    size = (5, 5)
+class Ball1(Widget):
+    #size = (5, 5)
+    pass
+class Ball2(Widget):
+    #size = (5, 5)
+    pass
+class Ball3(Widget):
+    #size = (5, 5)
+    pass
 
 # Creating the game class
 
@@ -146,10 +149,10 @@ car_speed_per_unit= 6 # car speed per unit
 car_slow_speed_per_unit= 3 # car slow speed per unit
 class Game(Widget):
 
-    car = Car()
-    ball1 = Ball1()
-    ball2 = Ball2()
-    ball3 = Ball3()
+    car = ObjectProperty(None) #Car()
+    ball1 = ObjectProperty(None) ##Ball1()
+    ball2 = ObjectProperty(None) ##Ball2()
+    ball3 = ObjectProperty(None) ##Ball3()
 
     def serve_car(self):
         global car_speed_per_unit
@@ -158,10 +161,10 @@ class Game(Widget):
         self.car.velocity = Vector(car_speed_per_unit, 0)
         #self.car.color = (1, 0.3, 0.4)
         # self.car.size = (5, 5)
-        self.add_widget(self.car)
-        self.add_widget(self.ball1)
-        self.add_widget(self.ball2)
-        self.add_widget(self.ball3)
+        #self.add_widget(self.car)
+        #self.add_widget(self.ball1)
+        #self.add_widget(self.ball2)
+        #self.add_widget(self.ball3)
 
     def update(self, dt):
         global brain

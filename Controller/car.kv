@@ -1,0 +1,34 @@
+#:kivy 1.0.9
+<Car>:
+    size: 10, 5
+    #size: 40, 15
+    canvas.before:
+        PushMatrix
+        Rotate:
+            angle: self.angle
+            origin: self.center
+    canvas:
+        Rectangle:
+            pos: self.pos
+            size: self.size
+    canvas.after:
+        PopMatrix
+<Ball1>:
+<Ball2>:
+<Ball3>:
+<Game>:
+    car: car
+    ball1: ball1
+    ball2: ball2
+    ball3: ball3
+    
+    Car:
+        id: car
+        
+    Ball1:
+        id: ball1
+        
+    Ball2:
+        id: ball2
+    Ball3:
+        id: ball3
