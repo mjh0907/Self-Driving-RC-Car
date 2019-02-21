@@ -33,7 +33,7 @@ length = 0 # length of current sand line
 # Getting our AI, which we call "brain", and that contains our neural network that represents our Q-function
 brain = Dqn(5,3,0.9) # 7 inputs, 4 outputs
 # keep 0 at first
-action2rotation = [0,20,-20]#, 180] # action rotations, go straigth, left turn 20 degree, right turn 20 degree, reverse
+action2rotation = [0,20,-20, 180] # action rotations, go straigth, left turn 20 degree, right turn 20 degree, reverse
 last_reward = 0
 scores = []
 
@@ -50,6 +50,7 @@ def init():
     first_update = False
 
 # Initializing the last distance
+continus_turn_times = 0
 last_distance = 0
 last_on_sand = False
 last_action = -1
@@ -57,7 +58,8 @@ last_action = -1
 # Creating the car class
 
 max_pixel_density = 16
-car_size = 10 
+car_size = 10
+#car_size = 40 
 class Car(Widget):
     #size = (car_size, 5)
     #color = (0, 100, 0)
@@ -85,8 +87,10 @@ class Car(Widget):
     signal3 = NumericProperty(0) # signal from sensor3
     signal4 = NumericProperty(0) # signal from sensor4
 
-    def move(self, rotation):
+    def move(self, action):
         #print("position: (" + str(self.x) + ", " + str(self.y) + ")")
+       
+        rotation = action2rotation[action]
         self.pos = Vector(*self.velocity) + self.pos
         self.rotation = rotation
         self.angle = self.angle + self.rotation
@@ -179,6 +183,7 @@ class Game(Widget):
         global largeur # width of map
         global car_speed_per_unit, car_slow_speed_per_unit
         global car_size
+        global continus_turn_times 
 
         longueur = self.width
         largeur = self.height
@@ -195,24 +200,33 @@ class Game(Widget):
         last_signal = [self.car.signal1, self.car.signal2, self.car.signal3, orientation, -orientation]
         #last_signal = [self.car.signal1, self.car.signal2, self.car.signal3, self.car.signal4, orientation, -orientation, distance_to_lane]
         action = brain.update(last_reward, last_signal)
-        print("score: "+repr(brain.score()))
+        wall_reward = -500 # 
+        last_reward = 0 # init
+        if self.car.signal1 < 0 and action == 0:
+            action = 3
+            last_reward = wall_reward
+        if self.car.signal2 < 0 and action == 1:
+            action = 3
+            last_reward = wall_reward
+        if self.car.signal3 < 0 and action == 2:
+            action = 3
+            last_reward = wall_reward
+        #print("score: "+repr(brain.score()))
         scores.append(brain.score())
-        rotation = action2rotation[action]
-        self.car.move(rotation)
+         # TODO send cmd to car
+        # todo make sure signal4 is 0
+        self.car.move(action)
         distance = np.sqrt((self.car.x - goal_x)**2 + (self.car.y - goal_y)**2)
         self.ball1.pos = self.car.sensor1
         self.ball2.pos = self.car.sensor2
         self.ball3.pos = self.car.sensor3
         self.steps += 1
         
-        sand_reward = 10#10 # 
-        wall_reward = -500 # 
-        to_no_sand_reward = -5000# 
+        sand_reward = 10 #10 # 
+        to_no_sand_reward = -500# 
         to_sand_reward = 0.1 # 
-        step_reward = 0.1 # basic reward each step
-        forward_reward = 0.1 # 
-        close_to_wall_reward = -0.1
-        last_reward = 0 # init
+        step_reward = 1# 0l2 #0.1 # basic reward each step
+        forward_reward = 0.0 # 
         #sand_reward = -50
         half_car_size = car_size / 2
         total = int(np.sum(sand[int(self.car.x)-half_car_size: int(self.car.x)+half_car_size,  int(self.car.y)-half_car_size :int(self.car.y)+half_car_size ]))
@@ -224,42 +238,56 @@ class Game(Widget):
             #print("on lane")
             # slowdown to get more bad samples?
             self.car.velocity = Vector(car_slow_speed_per_unit, 0).rotate(self.car.angle)
-            last_reward = sand_reward # sand reward
+            last_reward += sand_reward # sand reward
             if (last_on_sand == False):
                 last_reward += to_sand_reward # sand reward
             last_on_sand = True
-            #print("hit sand")
+            #print("on sand")
         elif total < 0:
+            print ("hit wall")
+            if (last_on_sand == True):
+                last_reward += to_no_sand_reward # sand reward
+                #print("to no sand")
+            last_on_sand = False
             # obstacle
             self.car.velocity = Vector(car_slow_speed_per_unit, 0).rotate(self.car.angle)
-            last_reward = wall_reward # sand reward
+            last_reward += wall_reward # sand reward
         else: # otherwise
+            #print ("unpaved road")
             self.car.velocity = Vector(car_speed_per_unit, 0).rotate(self.car.angle)
             if (last_on_sand == True):
                 last_reward += to_no_sand_reward # sand reward
+                #print("to no sand")
             last_on_sand = False
             if distance < last_distance:
-                last_reward += step_reward # driving towards objective reward
+                last_reward += step_reward * (last_distance - distance) # driving towards objective reward
             else:
-                last_reward += -step_reward # if driving away from objective reward
-            if last_action == 0:
-                last_reward += forward_reward
+                last_reward += -step_reward * (last_distance - distance) # if driving away from objective reward
+        
+        if last_action == 0:
+            last_reward += forward_reward
+            continus_turn_times = 0
+        else:
+            continus_turn_times += 1
+            #print("turning "+repr(continus_turn_times) + " times")
+        last_reward += -0.5* max(0, continus_turn_times-5) # each time we turn 20 degree
+
         last_reward += -0.005*self.steps #
             # TODO consider distance to obstacle, consider driving angle, lane departion, prefer go straight
 
         # TODO allow go out of boundary may lead to run time error?
         if self.car.x < car_size:
             self.car.x = car_size
-            last_reward += close_to_wall_reward # too close to edges of the wall reward
+            last_reward += wall_reward # too close to edges of the wall reward
         if self.car.x > self.width - car_size:
             self.car.x = self.width - car_size
-            last_reward += close_to_wall_reward #
+            last_reward += wall_reward #
         if self.car.y < car_size:
             self.car.y = car_size
-            last_reward +=  close_to_wall_reward #
+            last_reward +=  wall_reward #
         if self.car.y > self.height - car_size:
             self.car.y = self.height - car_size
-            last_reward += close_to_wall_reward 
+            last_reward += wall_reward 
         print("last reward: "+repr(last_reward))
 
         # TODO tune this
@@ -274,6 +302,7 @@ class Game(Widget):
             self.last_steps = self.steps 
             print("score: "+repr(brain.score())+ " steps: " + repr(self.steps))
             self.steps = 0
+            brain.clear_score()
         last_action = action
         last_distance = distance
 
@@ -321,7 +350,7 @@ class MyPaintWidget(Widget):
             pixel_depth = density
         #print("draw sand")
         if touch.button == 'left':
-            print("right mouse clicked")
+            #print("right mouse clicked")
             sand[int(touch.x) - w : int(touch.x) + w, int(touch.y) - w : int(touch.y) + w] = pixel_depth 
         else:
             sand[int(touch.x) - w : int(touch.x) + w, int(touch.y) - w : int(touch.y) + w] = -pixel_depth 

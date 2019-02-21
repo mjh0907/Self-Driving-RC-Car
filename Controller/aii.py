@@ -65,7 +65,7 @@ class Dqn():
         memory_capacity = 10000
         # terrible/bad/good/excellent memory
         self.memory = [ReplayMemory(memory_capacity), ReplayMemory(memory_capacity), ReplayMemory(memory_capacity), ReplayMemory(memory_capacity)]
-        self.reward_threshold = [-2, 0, 0.5, sys.maxint]
+        self.reward_threshold = [-3, 0, 3, sys.maxint]
         self.memory_threshold = [100, 50, 50, 100]
         self.optimizer = optim.Adam(self.model.parameters(), lr = 0.001)
         self.last_state = torch.Tensor(input_size).unsqueeze(0)
@@ -100,9 +100,10 @@ class Dqn():
                 self.memory[i].push((self.last_state, new_state, torch.LongTensor([int(self.last_action)]), torch.Tensor([self.last_reward])))
                 break
         for i in range(len(self.memory)):
-            if len(self.memory[i].memory) > self.memory_threshold[i]:
+            size = min(len(self.memory[i].memory), self.memory_threshold[i])
+            if (size > 0):
                 #print("learn from memory "+repr(i))
-                batch_state, batch_next_state, batch_action, batch_reward = self.memory[i].sample(self.memory_threshold[i]) #max(100, len(self.memory.memory)/3))
+                batch_state, batch_next_state, batch_action, batch_reward = self.memory[i].sample(size) #max(100, len(self.memory.memory)/3))
                 self.learn(batch_state, batch_next_state, batch_reward, batch_action)
         action = self.select_action(new_state)
         #print("state and action")
@@ -116,6 +117,8 @@ class Dqn():
             del self.reward_window[0]
         return action
         
+    def clear_score(self):
+        self.reward_window = []
     def score(self):
         return sum(self.reward_window)/(len(self.reward_window)+1.)
     
