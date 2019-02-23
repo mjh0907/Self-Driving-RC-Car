@@ -9,15 +9,19 @@ from Line import Line
 from line_fit import line_fit, tune_fit, final_viz, calc_curve, calc_vehicle_offset
 from moviepy.editor import VideoFileClip
 import argparse
+from time import sleep
+import threading
+import socket
 
 import zmq
 
 from VideoStream.constants import PORT
 from VideoStream.utils import string_to_image
+from RoadLaneLineDetection.lane_lines import annotate_image_array
 
 
 class StreamViewer:
-    def __init__(self, port=PORT):
+    def __init__(self, lane_server, lane_port, port=PORT):
         """
         Binds the computer to a ip address and starts listening for incoming streams.
 
@@ -30,6 +34,55 @@ class StreamViewer:
         self.current_frame = None
         self.keep_running = True
 
+        print("connecting to lane host..(please make sure you started car brain computer)"+repr(lane_host)+":"+repr(lane_port))
+        self.lane_socket = socket.socket()
+        #self.lane_socket.connect((lane_host, lane_port))
+
+        self.lane_socket.bind((lane_host, lane_port))
+        #become a server socket
+        self.lane_socket.listen(5)
+
+        print("connected to lane host")
+
+        self.lane_data_buffer = []
+        self.lock = threading.RLock()
+        self.t = threading.Thread(target=self.send_lane_data_loop)
+        self.t.daemon = True
+        self.t.start()
+
+    def send_lane_data_loop(self):
+        print("Waiting controller to connect")
+        #accept connections from outside
+        (client_socket, address) = self.lane_socket.accept()
+        print("Connected to controller and started send lane data loop")
+
+        while True:
+            self.lock.acquire()
+            try:
+                if len(self.lane_data_buffer) > 0:
+                    # todo do we need to encode the data?
+                    send_str = ""
+                    it = iter(self.lane_data_buffer)
+                    for l,r in zip(it, it):
+                        send_str += "%s,%s;"%(str(l), str(r))
+                    client_socket.send(send_str.encode())
+                    self.lane_data_buffer = []
+                    print("send lane data " + send_str)
+            finally:
+                self.lock.release()
+            sleep(0.05)
+        print("stopped send lane data")
+
+   
+    def append_lane_data(self, lane_data):
+        #lock and send
+        self.lock.acquire()
+        try:
+            self.lane_data_buffer.extend(lane_data)
+            #self.lane_data_buffer.append(lane_data)
+        finally:
+            self.lock.release()
+
     def receive_stream(self, display=True):
         """
         Displays displayed stream in a window if no arguments are passed.
@@ -41,25 +94,33 @@ class StreamViewer:
         idx = 0
         while self.footage_socket and self.keep_running:
             try:
-                frame = self.footage_socket.recv_string()
-                #print("received:"+frame)
-                self.current_frame = string_to_image(frame)
+                self.current_frame = mpimg.imread("messigray.bmp")
+                """frame = self.footage_socket.recv_string()
+                idx = (idx + 1)%10000000
+                if idx % 24 == 0:
+                    #print("received:"+frame)
+                    self.current_frame = string_to_image(frame)
+                """
                 annotated_image = self.current_frame 
                 #cv2.imshow("Stream", annotated_image)
-                idx = (idx + 1)%10000000
-                cv2.imshow("Stream Org2", annotated_image)
-                cv2.waitKey(1)
+                #cv2.imshow("Stream Org2", annotated_image)
+                #cv2.waitKey(1)
                 cv2.imshow("Stream Org", annotated_image)
                 cv2.waitKey(1)
-                if idx % 100 == 0:
-                    try:
-                        annotated_image = annotate_image(self.current_frame)
-                        if display:
-                            cv2.imshow("Stream", annotated_image)
-                            cv2.waitKey(1)
-                    except:
-                        annotated_image = self.current_frame 
-                        #print("not found")
+                #if idx % 100 == 0:
+                try:
+                    #print("annotated")
+                    annotated_image, lane_distance = annotate_image_array(self.current_frame)
+                    #print("done annotated: "+repr(idx))
+                    #print(lane_distance)
+                    self.append_lane_data(lane_distance)
+                    #annotated_image = annotate_image(self.current_frame)
+                    if display:
+                        cv2.imshow("Stream", annotated_image)
+                        cv2.waitKey(1)
+                except:
+                    annotated_image = self.current_frame 
+                    #print("not found")
 
             except KeyboardInterrupt:
                 cv2.destroyAllWindows()
@@ -170,6 +231,10 @@ if __name__ == '__main__':
     port = PORT
 
     parser = argparse.ArgumentParser()
+    parser.add_argument('-lh', '--lane_host',
+                        help='The host of lane data receiver', required=True)
+    parser.add_argument('-lp', '--lane_port',
+                        help='The port of lane data receiver', required=True)
     parser.add_argument('-p', '--port',
                         help='The port which you want the Streaming Viewer to use, default'
                              ' is ' + PORT, required=False)
@@ -178,7 +243,9 @@ if __name__ == '__main__':
     if args.port:
         port = args.port
 
-    stream_viewer = StreamViewer(port)
+    lane_host = args.lane_host
+    lane_port = int(args.lane_port)
+    stream_viewer = StreamViewer(lane_host, lane_port, port)
     stream_viewer.receive_stream()
 '''
     # Show example annotated image on screen for sanity check

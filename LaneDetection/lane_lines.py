@@ -50,6 +50,7 @@ class StreamViewer:
                 cv2.imshow("Stream Org", annotated_image)
                 cv2.waitKey(1)
                 if idx % 100 == 0:
+                    cv2.imwrite('messigray.png',annotated_image)
                     try:
                         annotated_image = annotate_image(self.current_frame)
                         if display:

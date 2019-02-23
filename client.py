@@ -1,11 +1,15 @@
 # External module imports
+import argparse
 import time
-from threading import Thread
+#from threading import Thread
+import threading
 from pynput.keyboard import Key, Listener
 import socket
 import sys
 import struct
 from PIL import Image
+from Controller.map import CarApp
+from Controller.map import getModelAction
 
 
 MAP_SIZE_PIXELS         = 500
@@ -38,7 +42,7 @@ class CustomizedMapVisualizer(Visualizer):
         # Pause to allow display to refresh
         plt.pause(.001)
 
-	# save to a png file
+    # save to a png file
         fig.savefig(image_filename)
 
         return self._refresh()
@@ -67,22 +71,90 @@ previous_angles    = None
 # Pin Definitons:
 freezeUntilTime = 0
 
+# current lidar scan points of cloud (360 degree data), 
+scan_lock = threading.RLock()
+current_scan = []
+pos_lock = threading.RLock()
+current_x = 0
+current_y = 0
+current_theta = 0
+
+# get obstacle distanct in lidar 360 degreescan data, 
+# NOTE assume current_scan is ready and data starts from 0 degree, assume clockwise
+# return distances(in mm) in 4 directions 
+# direction: 0: front, 1: left, 2: right, 3:  back
+def get_scan_distance():
+    distances = {}
+    total_angle = 360.0
+    directions = ["front", "left", "right", "back"]
+    # direction bounds
+    angles = [
+                [0, 10, 350, 360], # 0-10, 350-360 degree
+                [300, 350],
+                [10, 60],
+                [170, 190]
+             ]
+    scan_lock.acquire()
+    try:
+        size = len(current_scan)  # ydlidar has 720 points per scan
+        if size > 0:
+            for i in angles:
+                angle = angles[i]
+                dist = 100000
+                starts = angle[0::2]
+                ends = angle[1::2]
+                for j in range(0, len(starts)):
+                    s = int(starts[j]/total_angle*size)
+                    e = int(ends[j]/total_angle*size)
+                    # todo may need to ignore noise
+                    dist = min(dist, min(current_scan[s,e]))
+                distances[directions[i]] = dist
+    finally:
+        scan_lock.release()
+    return distances
+
+
+def update_current_scan(_scan):
+    scan_lock.acquire()
+    try:
+        current_scan = _scan
+    finally:
+        scan_lock.release()
+
+def get_current_position():
+    pos = []
+    pos_lock.acquire()
+    try:
+        pos = (current_x, current_y, current_theta)
+    finally:
+        pos_lock.release()
+
+    return pos
+
+def update_current_position(x, y, theta):
+    pos_lock.acquire()
+    try:
+        current_x = x
+        current_y = y
+        current_theta = theta
+    finally:
+        pos_lock.release()
+
 def doAction(pin, sec):
     time.sleep(sec)
 
 def action(pin, sec):  
     thread = Thread(target = doAction, args = (pin, sec, )) 
     thread.start()
-    	
 
-def autoDrive():
-    global autoMode
+def receive_lidar_data():
     idx = 0
     search_start = True
-
-    HOST, PORT = "192.168.0.18", 50007
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.connect((HOST, PORT))
+    # todo parameterize
+    # lidar server address
+    HOST, PORT = car_host, 50007
+    lidar_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    lidar_socket.connect((HOST, PORT))
     feed_point = 720 # ydlidar x4, each scan contains 720 point
     left_over = []
     while True:
@@ -96,7 +168,7 @@ def autoDrive():
         new_data = flatten
         '''
         print("receiving new data...")
-        raw_data = s.recv(10000)
+        raw_data = lidar_socket.recv(10000)
         num_floats = int(len(raw_data) / 4)
         format_str = 'f' * num_floats
         new_data = list(struct.unpack(format_str, raw_data[:num_floats * 4]))
@@ -139,6 +211,7 @@ def autoDrive():
                 print("found invalid data, restart!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
                 continue
             distances = [i*1000 for i in data[1:feed_size:2]]
+            update_current_scan(distances)
             left_over = data[feed_size:]
         else:
             left_over = left_over + data
@@ -169,7 +242,8 @@ def autoDrive():
 
         # Get current robot position
         x, y, theta = slam.getpos()
-	# Add new position to trajectory
+        update_current_position(x, y, theta)
+    # Add new position to trajectory
         trajectory.append((x, y))
 
         # Get current map bytes as grayscale
@@ -191,13 +265,13 @@ def autoDrive():
         if not viz.display(x/1000., y/1000., theta, mapbytes):
              exit(0)
         print("done display")
-        #doAction([leftPin], 0.1)
-              #time.sleep(1)
 
 def mm2pix(mm):
     return int(mm / (MAP_SIZE_METERS * 1000. / MAP_SIZE_PIXELS))  
          
+cmd_socket=[]
 def on_press(key):
+    global cmd_socket
     global freezeUntilTime
     millis = int(round(time.time() * 1000))
     if (millis < freezeUntilTime):
@@ -206,33 +280,90 @@ def on_press(key):
     actionDuration = 0.1
     freezeUntilTime = millis + actionDuration * 1000
     if hasattr(key,'char'):
-	#print("freeze until")
-	#print(freezeUntilTime)
-	if (key.char == 'a'):
-	    action([leftPin], actionDuration)
-	elif (key.char == 'd'):
-	    action([rightPin], actionDuration)
-	elif (key.char == 'w'):
-	    action([frontPin], actionDuration)
-	elif (key.char == 'x' or key.char == 's'):
-	    action([backPin], actionDuration)
-	elif (key.char == 'q'):
-	    action([frontPin, leftPin], actionDuration)
-	elif (key.char == 'e'):
-	    action([frontPin, rightPin], actionDuration)
-	elif (key.char == 'z'):
-	    action([backPin, leftPin], actionDuration)
-	elif (key.char == 'c'):
-	    action([backPin, rightPin], actionDuration)
-	else:
-	    print("Unrecognized key pressed")
-	    print('{0} pressed'.format(key))
+        cmd_str = key.char
+        print("send manual cmd "+ cmd_str)
+        #cmd_socket.send(cmd_str.encode())
+        
  
+app = CarApp()
+def runBrainModel():
+    global app
+    # load brain
+    app.load('Controller/last_brain.pth')
+    # load map, TODO prepare map
+    app.load_map('map.mp')
+    app.run()
 
+def receive_lane_data():
+    #create an INET, STREAMing socket
+    global cmd_socket
+    lane_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    lane_host = "localhost"
+    lane_port = 5553
+    lane_socket.connect((lane_host, lane_port))
+    CMD_PORT = 50008
+    cmd_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    #cmd_socket.connect((car_host, CMD_PORT))
 
-print("start")
+    while True:
+        # get lastest lane data
+        lane_data = server_socket.recv(2048)
+        lane_str = lane_data.decode()
+        print("receive lane string:" + lane_str)
+        lanes = lane_data.split(";")[-1].split(",")
+        print("parsed lane data:")
+        print(lanes)
+
+        # parse lidar data
+        distances = get_scan_distance()
+        print("current distance data:")
+        print(distances)
+
+        current_x, current_y, current_theta = get_current_pos()
+        print("current pos data:")
+        print(current_x)
+        print(current_y)
+        print(current_theta)
+
+        # call control model here
+        action = getModelAction([1,2,3,-1,2])
+        print(action)
+
+        #send command line to car
+        action_str = "w"
+        print("send auto cmd " + action_str)
+        #cmd_socket.send(action_str.encode())
+        # todo wait for car to act here?
+
+"""def main():
+parser = argparse.ArgumentParser()
+parser.add_argument('-s', '--car_host',
+                    help='car/raspberry pi IP address',
+                    required=True)
+
+args = parser.parse_args()
+
+if args.car_host:
+    car_host = args.car_host
+"""
+
+car_host = "localhost"
+print("running brain model")
+brain_thread = threading.Thread(target=runBrainModel)
+brain_thread.daemon = True
+brain_thread.start()
+
+print("start thread to receive lane data")
+lane_thread = threading.Thread(target=receive_lane_data)
+lane_thread.daemon = True
+lane_thread.start()
 # Collect events until released
 with Listener(
         on_press=on_press) as listener:
-    autoDrive()
+    # todo uncomment this
+    #autoDrive()
+    receive_lidar_data()
     listener.join()
+
+#if __name__ == '__main__':
+#    main()

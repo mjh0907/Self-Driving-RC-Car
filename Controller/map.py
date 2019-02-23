@@ -48,6 +48,11 @@ def init():
     goal_x = 20
     goal_y = largeur - 20
     first_update = False
+    
+def getModelAction(last_signal):
+        #last_signal = [self.car.signal1, self.car.signal2, self.car.signal3, orientation, -orientation]
+        #last_signal = [self.car.signal1, self.car.signal2, self.car.signal3, self.car.signal4, orientation, -orientation, distance_to_lane]
+        brain.update(last_reward, last_signal)
 
 # Initializing the last distance
 continus_turn_times = 0
@@ -288,7 +293,7 @@ class Game(Widget):
         if self.car.y > self.height - car_size:
             self.car.y = self.height - car_size
             last_reward += wall_reward 
-        print("last reward: "+repr(last_reward))
+        #print("last reward: "+repr(last_reward))
 
         # TODO tune this
         reach_goal_threshold = car_size * 4
@@ -314,6 +319,10 @@ max_obstacle_density = 16
 obstacle_density_threshold = 1 # pixel density
 sand_line_width = 20
 class MyPaintWidget(Widget):
+    
+    def load_map(self, mp):
+        print("todo, load map here")
+        #TODO load mp
 
     def on_touch_down(self, touch):
         global length, n_points, last_x, last_y, min_obstacle_density, max_obstacle_density, default_obstacle_density 
@@ -360,12 +369,18 @@ class MyPaintWidget(Widget):
 # Adding the API Buttons (clear, save and load)
 
 class CarApp(App):
-
+    simulate_map = True
+    def __init__(self):
+        self.painter = MyPaintWidget()
+    def load_map(self, mp):
+        self.simulate_map = False
+        self.painter.load_map(mp)    
+        # TODO load map from path mp
     def build(self):
         parent = Game()
         parent.serve_car()
-        Clock.schedule_interval(parent.update, 1.0/150.0)
-        self.painter = MyPaintWidget()
+        if self.simulate_map:
+            Clock.schedule_interval(parent.update, 1.0/150.0)
         clearbtn = Button(text = 'clear')
         savebtn = Button(text = 'save', pos = (parent.width, 0))
         loadbtn = Button(text = 'load', pos = (2 * parent.width, 0))
