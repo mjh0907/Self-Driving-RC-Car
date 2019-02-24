@@ -1,0 +1,28 @@
+instruction:
+
+cd ~/code/Self-Driving-RC-Car/
+
+auto drive:
+
+on raspberry pi
+1. start car firmware:
+	run rc.py on raspberry pi
+
+2. start car camera streaming:
+	run Streamer.py -s [laptop IP] -p 5555
+
+3. start lidar streaming
+
+on laptop:
+1. start lane detection
+	cd ~/code/Self-Driving-RC-Car/LaneDetection
+	python3 line_fit_stream.py -lh localhost -lp 5553
+
+2. start car controller:
+	change car_host to raspberry pi ip in client.py
+	python client.py  
+
+
+
+simulate:
+cd Controller && python3 map.py
