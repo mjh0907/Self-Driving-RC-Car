@@ -1,3 +1,4 @@
+#from utils import is_raspberry_pi
 from VideoStream.utils import is_raspberry_pi
 
 PORT = '5555'

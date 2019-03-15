@@ -282,7 +282,7 @@ def on_press(key):
     if hasattr(key,'char'):
         cmd_str = key.char
         print("send manual cmd "+ cmd_str)
-        #cmd_socket.send(cmd_str.encode())
+        cmd_socket.send(cmd_str.encode())
         
  
 app = CarApp()
@@ -303,11 +303,11 @@ def receive_lane_data():
     lane_socket.connect((lane_host, lane_port))
     CMD_PORT = 50008
     cmd_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    #cmd_socket.connect((car_host, CMD_PORT))
+    cmd_socket.connect((car_host, CMD_PORT))
 
     while True:
         # get lastest lane data
-        lane_data = server_socket.recv(2048)
+        lane_data = lane_socket.recv(2048)
         lane_str = lane_data.decode()
         print("receive lane string:" + lane_str)
         lanes = lane_data.split(";")[-1].split(",")
@@ -319,7 +319,7 @@ def receive_lane_data():
         print("current distance data:")
         print(distances)
 
-        current_x, current_y, current_theta = get_current_pos()
+        current_x, current_y, current_theta = get_current_position()
         print("current pos data:")
         print(current_x)
         print(current_y)
@@ -347,7 +347,7 @@ if args.car_host:
     car_host = args.car_host
 """
 
-car_host = "localhost"
+car_host = "192.168.137.189" #"localhost"
 print("running brain model")
 brain_thread = threading.Thread(target=runBrainModel)
 brain_thread.daemon = True

@@ -92,27 +92,30 @@ class StreamViewer:
         """
         self.keep_running = True
         idx = 0
+        #print("received:"+repr(idx))
         while self.footage_socket and self.keep_running:
             try:
-                self.current_frame = mpimg.imread("messigray.bmp")
-                """frame = self.footage_socket.recv_string()
+                #self.current_frame = mpimg.imread("messigray.bmp")
+                #print("received:"+repr(idx))
+                frame = self.footage_socket.recv_string()
                 idx = (idx + 1)%10000000
-                if idx % 24 == 0:
-                    #print("received:"+frame)
-                    self.current_frame = string_to_image(frame)
-                """
+                #print("received:"+repr(idx))
+                #if idx % 24 == 0:
+                #    print("received:"+frame)
+                self.current_frame = string_to_image(frame)
+                
                 annotated_image = self.current_frame 
                 #cv2.imshow("Stream", annotated_image)
                 #cv2.imshow("Stream Org2", annotated_image)
                 #cv2.waitKey(1)
-                cv2.imshow("Stream Org", annotated_image)
-                cv2.waitKey(1)
+                #cv2.imshow("Stream Org", self.current_frame)
+                #cv2.waitKey(1)
                 #if idx % 100 == 0:
                 try:
                     #print("annotated")
                     annotated_image, lane_distance = annotate_image_array(self.current_frame)
                     #print("done annotated: "+repr(idx))
-                    #print(lane_distance)
+                    print(lane_distance)
                     self.append_lane_data(lane_distance)
                     #annotated_image = annotate_image(self.current_frame)
                     if display:

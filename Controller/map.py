@@ -371,6 +371,7 @@ class MyPaintWidget(Widget):
 class CarApp(App):
     simulate_map = True
     def __init__(self):
+        #App.__init__(self)
         self.painter = MyPaintWidget()
     def load_map(self, mp):
         self.simulate_map = False
